@@ -299,5 +299,217 @@ heap_4 thay heap_1/2 — hỗ trợ free() + tái cấp phát, phù hợp với 
 SynaptiX/ tách hoàn toàn khỏi Core/ — cho phép regenerate code từ CubeMX mà không mất business logic
 UFQFPN48 package — form factor nhỏ gọn cho board công nghiệp, giới hạn số chân dẫn đến chọn STM32H523CCU6
 
+=====CẤU trúc của SynaptiX======
 
-Lưu ý thiếu thông tin: Nội dung thực tế của SynaptiX/ (apps, board, services) chưa đọc được do giới hạn robots.txt của GitHub. Cần đọc thêm các file sau để hiểu đầy đủ logic ứng dụng: SynaptiX/synaptix.mk, SynaptiX/apps/*.c, SynaptiX/board/*.c, SynaptiX/services/mbport/*.c, và Core/Src/app_freertos.c. Khi cần phát triển tính năng liên quan đến application logic, hãy cung cấp nội dung các file đó.
+D:\Synaptix\SynaptiX\Checkout\rs485\rs485v2\SynaptiX\services>tree /F
+Folder PATH listing
+Volume serial number is 6F52-D360
+D:.
+│   logger.c
+│   logger.h
+│   
+├───communicate
+│       communicate.c
+│       communicate.h
+│       
+├───lora
+│       lora.c
+│       lora.h
+│       
+├───mbport
+│       port.h
+│       portevent.c
+│       portserial.c
+│       porttimer.c
+│       
+├───Modbus
+│   │   bsd.txt
+│   │   Changelog.txt
+│   │   gpl.txt
+│   │   lgpl.txt
+│   │   README.md
+│   │   
+│   ├───demo
+│   │   └───STM32F0
+│   │       │   STM32F051R8TX_FLASH.ld
+│   │       │   TestJSON.ioc
+│   │       │   TestJSON.launch
+│   │       │   
+│   │       ├───Core
+│   │       │   ├───Inc
+│   │       │   │       cJSON.h
+│   │       │   │       cJSON_Utils.h
+│   │       │   │       main.h
+│   │       │   │       stm32f0xx_hal_conf.h
+│   │       │   │       stm32f0xx_it.h
+│   │       │   │       
+│   │       │   ├───Src
+│   │       │   │       cJSON.c
+│   │       │   │       cJSON_Utils.c
+│   │       │   │       main.c
+│   │       │   │       stm32f0xx_hal_msp.c
+│   │       │   │       stm32f0xx_it.c
+│   │       │   │       syscalls.c
+│   │       │   │       sysmem.c
+│   │       │   │       system_stm32f0xx.c
+│   │       │   │       
+│   │       │   └───Startup
+│   │       │           startup_stm32f051r8tx.s
+│   │       │           
+│   │       ├───Drivers
+│   │       │   ├───CMSIS
+│   │       │   │   ├───Device
+│   │       │   │   │   └───ST
+│   │       │   │   │       └───STM32F0xx
+│   │       │   │   │           └───Include
+│   │       │   │   │                   stm32f051x8.h
+│   │       │   │   │                   stm32f0xx.h
+│   │       │   │   │                   system_stm32f0xx.h
+│   │       │   │   │                   
+│   │       │   │   └───Include
+│   │       │   │           cmsis_armcc.h
+│   │       │   │           cmsis_armclang.h
+│   │       │   │           cmsis_compiler.h
+│   │       │   │           cmsis_gcc.h
+│   │       │   │           cmsis_iccarm.h
+│   │       │   │           cmsis_version.h
+│   │       │   │           core_armv8mbl.h
+│   │       │   │           core_armv8mml.h
+│   │       │   │           core_cm0.h
+│   │       │   │           core_cm0plus.h
+│   │       │   │           core_cm1.h
+│   │       │   │           core_cm23.h
+│   │       │   │           core_cm3.h
+│   │       │   │           core_cm33.h
+│   │       │   │           core_cm4.h
+│   │       │   │           core_cm7.h
+│   │       │   │           core_sc000.h
+│   │       │   │           core_sc300.h
+│   │       │   │           mpu_armv7.h
+│   │       │   │           mpu_armv8.h
+│   │       │   │           tz_context.h
+│   │       │   │           
+│   │       │   └───STM32F0xx_HAL_Driver
+│   │       │       ├───Inc
+│   │       │       │   │   stm32f0xx_hal.h
+│   │       │       │   │   stm32f0xx_hal_cortex.h
+│   │       │       │   │   stm32f0xx_hal_def.h
+│   │       │       │   │   stm32f0xx_hal_dma.h
+│   │       │       │   │   stm32f0xx_hal_dma_ex.h
+│   │       │       │   │   stm32f0xx_hal_exti.h
+│   │       │       │   │   stm32f0xx_hal_flash.h
+│   │       │       │   │   stm32f0xx_hal_flash_ex.h
+│   │       │       │   │   stm32f0xx_hal_gpio.h
+│   │       │       │   │   stm32f0xx_hal_gpio_ex.h
+│   │       │       │   │   stm32f0xx_hal_i2c.h
+│   │       │       │   │   stm32f0xx_hal_i2c_ex.h
+│   │       │       │   │   stm32f0xx_hal_pwr.h
+│   │       │       │   │   stm32f0xx_hal_pwr_ex.h
+│   │       │       │   │   stm32f0xx_hal_rcc.h
+│   │       │       │   │   stm32f0xx_hal_rcc_ex.h
+│   │       │       │   │   stm32f0xx_hal_tim.h
+│   │       │       │   │   stm32f0xx_hal_tim_ex.h
+│   │       │       │   │   stm32f0xx_hal_uart.h
+│   │       │       │   │   stm32f0xx_hal_uart_ex.h
+│   │       │       │   │   
+│   │       │       │   └───Legacy
+│   │       │       │           stm32_hal_legacy.h
+│   │       │       │           
+│   │       │       └───Src
+│   │       │               stm32f0xx_hal.c
+│   │       │               stm32f0xx_hal_cortex.c
+│   │       │               stm32f0xx_hal_dma.c
+│   │       │               stm32f0xx_hal_exti.c
+│   │       │               stm32f0xx_hal_flash.c
+│   │       │               stm32f0xx_hal_flash_ex.c
+│   │       │               stm32f0xx_hal_gpio.c
+│   │       │               stm32f0xx_hal_i2c.c
+│   │       │               stm32f0xx_hal_i2c_ex.c
+│   │       │               stm32f0xx_hal_pwr.c
+│   │       │               stm32f0xx_hal_pwr_ex.c
+│   │       │               stm32f0xx_hal_rcc.c
+│   │       │               stm32f0xx_hal_rcc_ex.c
+│   │       │               stm32f0xx_hal_tim.c
+│   │       │               stm32f0xx_hal_tim_ex.c
+│   │       │               stm32f0xx_hal_uart.c
+│   │       │               stm32f0xx_hal_uart_ex.c
+│   │       │               
+│   │       └───port
+│   │               port.h
+│   │               portevent.c
+│   │               portserial.c
+│   │               porttimer.c
+│   │               user_mb_app.c
+│   │               user_mb_app.h
+│   │               
+│   ├───doc
+│   │       dox.css
+│   │       doxygen.conf
+│   │       dox_html_footer
+│   │       dox_html_header
+│   │       main.dox
+│   │       memory.ods
+│   │       porting.dox
+│   │       tips.dox
+│   │       TODO.txt
+│   │       
+│   ├───modbus
+│   │   │   mb.c
+│   │   │   
+│   │   ├───ascii
+│   │   │       mbascii.c
+│   │   │       mbascii.h
+│   │   │       
+│   │   ├───functions
+│   │   │       mbfunccoils.c
+│   │   │       mbfuncdiag.c
+│   │   │       mbfuncdisc.c
+│   │   │       mbfuncholding.c
+│   │   │       mbfuncinput.c
+│   │   │       mbfuncother.c
+│   │   │       mbutils.c
+│   │   │       
+│   │   ├───include
+│   │   │       mb.h
+│   │   │       mbconfig.h
+│   │   │       mbframe.h
+│   │   │       mbfunc.h
+│   │   │       mbport.h
+│   │   │       mbproto.h
+│   │   │       mbutils.h
+│   │   │       
+│   │   ├───rtu
+│   │   │       mbcrc.c
+│   │   │       mbcrc.h
+│   │   │       mbrtu.c
+│   │   │       mbrtu.h
+│   │   │       
+│   │   └───tcp
+│   │           mbtcp.c
+│   │           mbtcp.h
+│   │           
+│   ├───port
+│   │       port.h
+│   │       portevent.c
+│   │       portserial.c
+│   │       porttimer.c
+│   │       user_mb_app.c
+│   │       user_mb_app.h
+│   │       
+│   └───tools
+│           doxygen.exe
+│           indent.sh
+│           lint-arm.sh
+│           lint-avr.sh
+│           README.txt
+│           
+├───shell
+│       cli_shell.c
+│       cli_shell.h
+│       
+└───zigbee
+        zigbee.c
+        zigbee.h
+        
+
+D:\Synaptix\SynaptiX\Checkout\rs485\rs485v2\SynaptiX\services>
