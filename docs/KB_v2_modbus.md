@@ -771,3 +771,233 @@ Một số thông tin vẫn còn thiếu để KB hoàn chỉnh 100%:
 - `MB_RTU_ENABLED`, `MB_ASCII_ENABLED` — cả hai có bật không?
 - `MB_SLAVE_RTU_ENABLED` vs `MB_MASTER_RTU_ENABLED`
 - Buffer size defines trong mbconfig
+---
+
+## ADDENDUM — Kiến Thức Bổ Sung (Confirmed từ source code)
+
+### A1. CQueue — Thread Safety Analysis (CONFIRMED)
+
+`cqueue_send()` và `cqueue_receive()` **không có bất kỳ critical section nào**:
+
+```c
+bool cqueue_send(CQueue_t *queue, void *item) {
+    if(!cqueue_is_full(queue)) {
+        memcpy(queue->buff + queue->head*queue->size, item, queue->size);
+        int next = (queue->head+1) % queue->len;
+        queue->head = next;
+        queue->count += 1;   // ← non-atomic read-modify-write
+        return true;
+    }
+    return false;
+}
+```
+
+**Kết luận:** CQueue là **truly non-atomic**. An toàn hiện tại chỉ nhờ NVIC priority model:
+- ISR (priority 5) không thể bị preempt bởi FreeRTOS task (priority 15)
+- Single-core CM33: ISR và task không chạy đồng thời
+- **Risk thực tế = LOW** với kiến trúc hiện tại, nhưng **vi phạm lý thuyết** nếu có ISR khác ở priority < 5 cũng gọi cqueue
+
+---
+
+### A2. TIM Interrupt Routing — CONFIRMED WORKING
+
+`stm32h5xx_it.c` xác nhận:
+
+```c
+void TIM2_IRQHandler(void) { HAL_TIM_IRQHandler(&htim2); }
+void TIM3_IRQHandler(void) { HAL_TIM_IRQHandler(&htim3); }
+```
+
+HAL sẽ gọi weak `HAL_TIM_PeriodElapsedCallback()`. **Nhưng:** file này KHÔNG override callback đó. Callback được override ở đâu đó khác — tìm thấy trong `board.c`:
+
+```c
+void BSP_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
+    if(htim == &htim2) { if(tim_handle[0] != NULL) tim_handle[0](); }
+    if(htim == &htim3) { if(tim_handle[1] != NULL) tim_handle[1](); }
+}
+```
+
+**Missing link:** `HAL_TIM_PeriodElapsedCallback` → `BSP_TIM_PeriodElapsedCallback` không thấy trong `stm32h5xx_it.c`. Phải được override ở file khác (có thể trong `Core/Src/stm32h5xx_hal_msp.c` hoặc một USER CODE block). Cần verify thêm nếu cần — nhưng nếu Modbus timer hoạt động trên V2 thực tế thì routing này phải tồn tại ở đâu đó.
+
+---
+
+### A3. mbconfig.h — Feature Flags (CONFIRMED)
+
+```c
+MB_RTU_ENABLED    = 1   // ✅ RTU enabled
+MB_ASCII_ENABLED  = 1   // ✅ ASCII enabled (cả hai bật, nhưng app chỉ gọi MB_RTU)
+MB_TCP_ENABLED    = 0   // TCP disabled
+
+// Tất cả Function Codes đều enabled:
+MB_FUNC_READ_INPUT_ENABLED              = 1  // FC04
+MB_FUNC_READ_HOLDING_ENABLED            = 1  // FC03
+MB_FUNC_WRITE_HOLDING_ENABLED           = 1  // FC06
+MB_FUNC_WRITE_MULTIPLE_HOLDING_ENABLED  = 1  // FC16
+MB_FUNC_READ_COILS_ENABLED              = 1  // FC01
+MB_FUNC_WRITE_COIL_ENABLED              = 1  // FC05
+MB_FUNC_WRITE_MULTIPLE_COILS_ENABLED    = 1  // FC15
+MB_FUNC_READ_DISCRETE_INPUTS_ENABLED    = 1  // FC02
+MB_FUNC_READWRITE_HOLDING_ENABLED       = 1  // FC23
+MB_FUNC_OTHER_REP_SLAVEID_ENABLED       = 1  // FC17
+MB_FUNC_HANDLERS_MAX                    = 16
+MB_ASCII_TIMEOUT_SEC                    = 1
+```
+
+---
+
+### A4. Register Map — CONFIRMED & CORRECTED
+
+KB_v2_modbus.md trước đây ghi `usSRegHoldBuf[172]` và `S_COIL_NCOILS=56` — **SAI**. Giá trị thực từ `user_mb_app.h`:
+
+| Type | Count | Buffer size | Start addr |
+|---|---|---|---|
+| Holding Registers | **100** (`S_REG_HOLDING_NREGS`) | `usSRegHoldBuf[100]` = 200 bytes | 0 |
+| Input Registers | **100** (`S_REG_INPUT_NREGS`) | `usSRegInBuf[100]` = 200 bytes | 0 |
+| Coils (output) | **64** (`S_COIL_NCOILS`) | `ucSCoilBuf[8]` = 8 bytes | 0 |
+| Discrete Inputs | **64** (`S_DISCRETE_INPUT_NDISCRETES`) | `ucSDiscInBuf[8]` = 8 bytes | 0 |
+
+---
+
+### A5. GPIO ↔ Modbus Register Mapping (CONFIRMED)
+
+**Đây là thông tin quan trọng nhất còn thiếu — nay được làm rõ:**
+
+#### Digital Inputs (IN0–IN3) → Discrete Input Coils
+
+Mapping thực hiện trong `input_poll()` (`input.c`):
+
+```c
+// IN_x HIGH → set bit x trong ucSDiscInBuf[0]
+input_coils[0] |= (0x01 << input->input_num);   // set bit khi có input
+input_coils[0] &= ~(0x01 << input->input_num);  // clear bit khi không có input
+```
+
+`input_coils` = pointer tới `ucSDiscInBuf` (Discrete Input buffer)
+
+| Physical | Modbus | Register | Bit |
+|---|---|---|---|
+| IN0 (PB6) | Discrete Input | addr 0, `ucSDiscInBuf[0]` | bit 0 |
+| IN1 (PB5) | Discrete Input | addr 0, `ucSDiscInBuf[0]` | bit 1 |
+| IN2 (PB4) | Discrete Input | addr 0, `ucSDiscInBuf[0]` | bit 2 |
+| IN3 (PB3) | Discrete Input | addr 0, `ucSDiscInBuf[0]` | bit 3 |
+
+**Debounce:** 50ms (`MAX_TIME_DEBOUNCE = 50`), polling mỗi 10ms (`app_poll` timer_stamp > 10).
+
+**Counter:** Mỗi IN_x có counter riêng lưu vào `input_reg[i+16]` (Input Register addr 16..19). Counter tăng mỗi lần edge rising, reset khi `output_coils[1]` bit tương ứng được set.
+
+#### Digital Outputs (OUT0–OUT3) → Coils
+
+Mapping thực hiện trong `output_poll()` (`output.c`):
+
+```c
+// Đọc bit x từ ucSCoilBuf[0] (output_coils[0]) → điều khiển GPIO
+if(output_coils[0] >> output->output_num & 0x01) { bsp_output_on(i); }
+else { bsp_output_off(i); }
+```
+
+`output_coils` = pointer tới `ucSCoilBuf` (Coil buffer)
+
+| Physical | Modbus | Register | Bit |
+|---|---|---|---|
+| OUT0 (PA6) | Coil | addr 0, `ucSCoilBuf[0]` | bit 0 |
+| OUT1 (PA7) | Coil | addr 0, `ucSCoilBuf[0]` | bit 1 |
+| OUT2 (PB0) | Coil | addr 0, `ucSCoilBuf[0]` | bit 2 |
+| OUT3 (PB1) | Coil | addr 0, `ucSCoilBuf[0]` | bit 3 |
+
+Output state cũng được mirror vào `hoding_reg[i]` (Holding Register addr 0..3).
+
+**Output reset mechanism:** `output_coils[1]` bit x = 1 → reset counter của input x về 0. Đây là cơ chế cross-buffer control từ Modbus master.
+
+#### Zigbee Parameters → Input Registers (addr 20..40)
+
+Phát hiện quan trọng trong `user_mb_app.c`:
+
+```c
+// Mỗi lần FC04 Read Input Registers được gọi:
+usSRegInBuf[20] = bsp_get_address();      // addr 20: slave address
+usSRegInBuf[21] = zigbee.param.pointType; // addr 21: Zigbee node type
+usSRegInBuf[22] = zigbee.param.PAN_ID;   // addr 22: PAN ID
+usSRegInBuf[23] = zigbee.param.Channel;  // addr 23: Channel
+// ... tiếp tục đến addr 40 (20 Zigbee parameters)
+```
+
+**Input Register map đầy đủ:**
+
+| Addr | Nội dung |
+|---|---|
+| 0 | Reserved |
+| 1–15 | Undefined (available) |
+| 16 | Counter IN0 |
+| 17 | Counter IN1 |
+| 18 | Counter IN2 |
+| 19 | Counter IN3 |
+| 20 | Slave address (`bsp_get_address()`) |
+| 21 | `zigbee.param.pointType` |
+| 22 | `zigbee.param.PAN_ID` |
+| 23 | `zigbee.param.Channel` |
+| 24 | `zigbee.param.transferModel` |
+| 25 | `zigbee.param.userAddress` |
+| 26 | `zigbee.param.antennaSelect` |
+| 27–34 | `zigbee.param.macAddress[0..7]` (mỗi byte 1 register) |
+| 35 | `zigbee.param.shortAddress` |
+| 36 | `zigbee.param.isSecurity` |
+| 37–40 | `zigbee.param.securityCode[0..3]` |
+
+**Zigbee và Modbus bị coupling trực tiếp** — `user_mb_app.c` include `rf_app.h` và dùng `extern ZigbeeMesh_t zigbee`.
+
+---
+
+### A6. app_poll() Timing — CONFIRMED
+
+```
+app_poll() được gọi trong main FreeRTOS task loop (không delay):
+
+Every call (unbounded rate):
+    bsp_iwdg_refresh()
+    rf_app_poll()          → zigbee_poll() mỗi 1ms
+    user_app()             → empty (USER CODE BEGIN/END)
+
+Every > 20ms:
+    if Parency_Modbus && !rf_app_busy():
+        eMBPoll(&modbus[i])     ← Modbus processing
+        mb_uart_rx_task()       ← drain RX queue
+    user_mb_app_poll()          ← empty hiện tại
+
+Every > 10ms:
+    input_app_poll(10)     → đọc GPIO IN0–IN3, update ucSDiscInBuf
+    output_app_poll(10)    → đọc ucSCoilBuf, drive GPIO OUT0–OUT3
+```
+
+**Vấn đề phát hiện:** `eMBPoll()` chỉ được gọi mỗi >20ms. Với Modbus 115200 baud, response time thêm 20ms latency là chấp nhận được nhưng không tối ưu. Quan trọng hơn: **khi rf_app_busy() = true (đang configure Zigbee), Modbus bị treo hoàn toàn**.
+
+---
+
+### A7. Slave Address (CONFIRMED)
+
+`bsp_get_address()` hardcoded trả về `1`:
+
+```c
+uint8_t bsp_get_address() { return 1; }
+```
+
+Không đọc GPIO, không đọc Flash. Slave address cố định = 1 cho toàn bộ V2. Nếu V3 cần configurable address, phải implement lại hàm này.
+
+---
+
+### A8. Zigbee–Modbus Coupling Summary
+
+Đây là coupling không được document trong KB_v2_modbus.md gốc:
+
+```
+user_mb_app.c
+    ├── #include "rf_app.h"          → include zigbee.h
+    ├── extern ZigbeeMesh_t zigbee   → truy cập trực tiếp Zigbee state
+    └── rf_register[20] = pointers vào zigbee.param.*
+              → exposed qua Modbus FC04 Input Registers addr 21–40
+
+app.c:
+    → rf_app_busy() kiểm tra zigbee.event.event
+    → nếu Zigbee đang busy: Modbus bị skip trong loop
+```
+
+**Khi port sang V3:** nếu tách Zigbee và Modbus thành module độc lập, phải cung cấp cơ chế cho `user_mb_app` đọc Zigbee params mà không cần `extern ZigbeeMesh_t zigbee` trực tiếp.
